@@ -1,0 +1,557 @@
+---
+title: "Mixed Model Workshop Part 1"
+author: "Lorna Le Stanc"
+date: "10/22/2021"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+    df_print: paged
+    fig_width: 7
+    fig_height: 4
+  pdf_document:
+    toc: yes
+    number_sections: yes
+    fig_width: 5
+    fig_height: 4
+---
+
+# Goal of this workshop session
+
+In this part one we will understand the difference between fixed and main effects.
+
+We will try to understand the math behind linear model and what is called "contrast coding".
+
+# Needed libraries
+
+```{r, message = FALSE, warning=FALSE}
+# to manipulate and plot data
+library(tidyverse)
+
+# to do an anova
+library(ez)
+
+# to obtain main effects from linear models and linear mixed models
+library(rstatix)
+
+```
+
+# Dataset for the workshop
+
+Here we will work on reaction times (continuous variable)
+
+-   Two groups (control vs test)
+
+-   Two sessions (T0 vs T1)
+
+-   4 items per sessions (each with 5 trials) -\> 20 trials per participant and session.
+
+This is a 2x2 design, with group as a between-subjects variables and session as a within-subject variable.
+
+The dataset was built such as :
+
+```{r, eval = F}
+# Number of subjects per groups (2 groups, control/test)
+N = 30
+# number of trials per subject
+ntrials = 20
+# reaction time at T0 for both groups (ms)
+int.T0 = 950
+# Retest effect
+slope.retest = 100
+# Training effect
+slope.training = 150
+# variance among subjects at T0
+sd = 50
+# variance among retest and training effects is sd/2
+```
+
+```{r, echo = FALSE, message=FALSE, eval = T}
+data = read_csv("../data/dataset_groupXsessionXage.csv")%>%
+  rename(participant = pax)%>%
+  select(-age)
+```
+
+Columns in dataset :
+
+```{r, echo = F}
+names(data)
+```
+
+# What you usually do (I guess) aka ANOVA and Main effects
+
+## Mean by participant and session across trials and items
+
+```{r, message=FALSE}
+data.mean = data %>%
+  group_by(participant, group,session)%>%
+  summarise(rt.mean.bPbS = mean(rt))%>%
+  ungroup()
+```
+
+rt.mean.bPbS for mean rt by participant by session.
+
+```{r, echo = FALSE}
+names(data.mean)
+```
+
+You go from (30x2x2x20) = `r nrow(data)` observations to 30x2x2 = `r nrow(data.mean)` observations.
+
+```{r echo=FALSE, message=FALSE, fig.align = "center"}
+
+ggplot(data.mean, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  theme_bw()
+```
+
+Each point represents the mean reaction time of a participant in a given session.
+
+## Runing an ANOVA in R using ez Package
+
+```{r, message=FALSE, warning=F}
+aov = ezANOVA(data.mean, 
+              dv = rt.mean.bPbS, 
+              wid = participant, 
+              within = session,
+              between = group,
+              return_aov = TRUE)
+
+aov$ANOVA
+```
+
+dv = dependent variable ie what we measure, ie our outcome variable\
+wid = identification for our participants\
+within = for within-participant variables\
+between = for between session variable\
+
+We could add covariates, chosse the type of anova etc. See `help(ezANOVA)` for more information.
+
+## Interpreting an ANOVA
+
+In ANOVAs you are comparing whether the means are different in one variable (let's say group) across all the levels of the other variable (here session). That is called a **main effect**
+
+### Group effect
+
+```{r, message=F}
+data.group = data.mean%>%
+  group_by(participant, group)%>%
+  summarise(rt.mean.bP = mean(rt.mean.bPbS))%>%
+  ungroup()
+```
+
+```{r, echo = FALSE, message = FALSE, fig.align='center'}
+ggplot(data.group, aes(x = group, y = rt.mean.bP, fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5)+
+  stat_summary(geom = "pointrange",
+    fun = "mean",
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2", show.legend = FALSE)+
+  theme_bw()
+```
+
+Each point represents the mean reaction time of one participant across both sessions.
+
+> There is a main effect of group across all sessions. With group test being faster than the control group.
+
+Notice that it can be misleading because at T0, the two groups do not seam to be different. The difference is driven by the effect at T1.
+
+### Session effect
+
+```{r, message=FALSE, warning=FALSE}
+data.session = data.mean%>%
+  group_by(session, participant)%>%
+  summarise(rt.mean.bP = mean(rt.mean.bPbS))%>%
+  ungroup()
+```
+
+```{r, echo = FALSE, message = FALSE, fig.align='center'}
+ggplot(data.session, aes(x = session, y = rt.mean.bP))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position="dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9), show.legend = F)+
+  theme_bw()
+```
+
+Each point represents the mean reaction time of one participant. 
+
+> There is a main effect of session across groups. With participants being faster at T1 than T0.
+
+### Interaction effect
+
+```{r, echo = FALSE, message=FALSE, fig.align='center'}
+
+data.interaction = data.mean%>%
+  mutate(session = as.factor(session))%>%
+  mutate(new_session = case_when(
+    group == "control" ~ as.numeric(session)-0.225,
+    group == "test" ~ as.numeric(session)+0.225
+  ))%>%
+  mutate(group = as.factor(group))%>%
+  mutate(new_group = case_when(
+    session == "T0" ~ as.numeric(group),
+    session == "T1" ~ as.numeric(group)
+  ))
+
+ggplot(data.interaction, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(fun = mean, geom = "line", col = "darkgoldenrod2", aes(x = new_session, group = group)) +
+  theme_bw()
+```
+
+> There is an interaction between group and session meaning that the effect of group is different at T0 and T1. It also means that the effect of session is different according to the group (represented on the figure).
+
+> The interaction is the statistical test to say that the slopes are different.
+
+# Short reminder on linear models and FIXED effect. How to interpret stuff.
+
+So far we have talked about main effect in Anovas. Linear models (and mixed linear models) do not have main effects. At least no strait out of the model output. 
+You can get main effects from linear models and we will see how. But we will try to understand first what are fixed effect and how to interpret the output of a linear model. 
+
+## The mathematics behind linear models (because we will need it later)
+
+Equation for a linear regression :
+
+------------------------------------------------------------------------
+
+<center>
+
+y = b + ax
+
+means
+
+y = Intercept + Slope \* x
+
+</center>
+
+------------------------------------------------------------------------
+
+Where 
+
+-   y is the dependent variable or outcome
+-   x is the independent variable or predictor
+
+-\> The predictor as an effect on the outcome
+
+## Interpretation with a continuous predictor
+
+-   Intercept is the value of y when x = 0 : 
+<center> y = Intercept + Slope\*0 = Intercept </center> 
+-   Slope is the slope ie. how much you increase in y when you increase x by one :
+<center> [ Intercept + Slope\*(.. + 1) ] - [ Intercept + Slope\*(..) ] = Slope</center> 
+
+-\> You write all of this y \~ x and the model give you an estimation of the Intercept and Slope
+
+**E.g height as a function of age**
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.align='center'}
+data_ageheight = read_csv("../data/dataset_ageheight.csv")%>%
+  mutate(age_group = relevel(as.factor(age_group), ref = "younger"))
+
+lm.continuous = lm(height~ age, data_ageheight)
+
+ggplot(data_ageheight, aes(x = age, y = height))+
+  geom_point()+
+  geom_smooth(method = lm, se = F, fullrange = TRUE)+
+  scale_y_continuous(breaks=seq(0,160,20), limits = c(0,160),expand = c(0,0))+
+  scale_x_continuous(breaks = seq(0,15,1), limits = c(0,15),expand = c(0,0))+
+  geom_text(x=1, y= lm.continuous$coefficients[[1]], label="Intercept")+
+  geom_segment(x = 5, xend = 6, y = lm.continuous$coefficients[[1]], yend = lm.continuous$coefficients[[1]] )+
+  geom_segment(x = 6, xend = 6, y = lm.continuous$coefficients[[1]], yend = lm.continuous$coefficients[[1]]+ lm.continuous$coefficients[[2]])+
+  geom_text(x=5.5, y = lm.continuous$coefficients[[1]]-5, label = "1")+
+  geom_text(x = 6.5, y =lm.continuous$coefficients[[1]]+5, label = "Slope" )+
+  theme_bw()+
+  theme(panel.grid.minor.x = element_blank())
+
+```
+
+
+Each point represent a participant. \
+The blue line represent the fitted model ie the theoretical values ie the predicted values. 
+The distance between a point and the blue line is the error of prediction for that point. It is call a residual. 
+
+```{r}
+lm.continuous = lm(height~ age, data_ageheight)
+summary(lm.continuous)
+```
+
+**"Call"** line tells you the model you used as well as the data you fed into the model. 
+
+**"Residuals"** lines tell you the minimum, first quartile, median, 3rd quartile and maximum of your residuals. Knowing that your residuals are supposed to be normally distributed under linear model assumptions, you can use these line to quickly ckeck that there is not a huge problem. You can also plot your residual to check this assumption.
+
+```{r, eval = FALSE}
+plot(residuals(lm.continuous))
+
+qqnorm(resid(lm.continuous) )
+qqline(resid(lm.continuous), col = "red")
+```
+
+**"Coefficients"** show you the estimated values for the Intercept and Slope as well as the standard error, t-value and p-value. \
+Note that the line (Intercept) reports the statistical test that the Intercept is different from 0. Similarly the age line reports the statistical test for the slope for age being different from 0. The sign of the slope (plus or minus) tells you if you increase in y when you increase in x (here you increase in height when you increase in age).
+
+The **R-squared** relates the percentage of variance explained in the model. The fundamental difference between multiple and adjusted is that when you add predictors to your model, the multiple R-squared will always increase, as a predictor will always explain some portion of the variance. Adjusted R-squared controls against this increase, and adds penalties for the number of predictors in the model.
+
+The **F-statistic** tells you if your model statically explains the data better than a model with no predictor (here yes, pvalue<.05). 
+
+## Interpretation for a discreate predictor (ie categorical variable)
+
+-   WARNING : Intercept is the value of y in the group of reference.
+
+-   Slope is the difference between the two categories. How much you jump in y when you change categories in x.
+
+Indeed mathematically, R consider one group to be equal to 0 (the reference group), and the other to 1. So again the slope is how much you jump in y when you jump one in x except that here you can only jump by one on x. 
+
+**Eg. height as a function of age group**
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.width=5, fig.height=4, fig.align='center'}
+ggplot(data_ageheight, aes(x = age_group, y = height))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  geom_segment(x = 1, xend = 2, y = 90, yend = 90)+
+  geom_segment(x = 2, xend = 2, y = 90, yend = 90+33)+
+  geom_text(x = 1.5, y = 80, label = "1")+
+  geom_text(x = 2.2, y = 110, label = "Slope")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(fun = mean, geom = "line", aes(group = 1),col = "darkgoldenrod2")+
+  scale_y_continuous(breaks=seq(-10,160,20), limits = c(0,160))+
+  scale_x_discrete(breaks = c("younger","older"))+
+  geom_text(x=1, y=90, label="Intercept")+
+  theme_bw()+
+  theme(panel.grid.major.x = element_blank())
+
+summary(lm(height~ age_group, data_ageheight))
+```
+
+> Note the age_group**older** It means that the reference group was the youger group. (you can change it by releveling the factor group and changing its reference to older, by default alphabetical order). It will be important when we have more than one categorical predictor.
+
+## Interpretation for two discreate predictors
+
+Let's get back to our previous data set and study the effect of group and condition on the reaction time.
+
+```{r, echo = FALSE, message=FALSE}
+ggplot(data.interaction, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  theme_bw()
+```
+
+Mathematically :
+
+------------------------------------------------------------------------
+
+<center>
+
+rt.mean.bPbS = Intercept + a x group + b x session + c x groupxsession
+
+</center>
+
+
+
+Notations Fixed Effects and interaction:
+
+-   \+ means no interaction
+
+-   : means interaction
+
+-   \* means fixed effect plus interaction
+
+Model : `rt.mean.bPbS ~ group*session` same as `rt.mean.bPbS ~ group + session + group:session`
+
+Your model give you the estimation of the\
+- Intercept (mean rt value in ref level of group and session, *here controls at T0*)\
+- a (fixed effect of group in the base level of session, *here test vs controls at T0*),\
+- b (fixed effect of session in the base level of group, *here T1 vs T0 in controls*),\
+- c (interaction = difference in slopes)
+
+------------------------------------------------------------------------
+
+```{r}
+lm = lm(rt.mean.bPbS ~ group*session, data = data.mean)
+summary(lm)
+```
+
+Note that there is no effect of group contrary to the anova.
+
+Mathematically :
+
+------------------------------------------------------------------------
+
+<center>
+
+rt.mean.bPbS = Intercept + grouptest\*group + sessionT1\*session + grouptest:sessionT1\*group\*session
+
+</center>
+
+Where
+
+-   session = 0 if T0, session = 1 if T1
+-   group = 0 if control, group = 1 if test
+-   Intercept is the minimum in ref level (session = 0, group = 0)
+
+------------------------------------------------------------------------
+
+```{r, echo = FALSE, message=FALSE}
+
+ggplot(data.interaction, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  # stat_summary(fun = mean, geom = "line", col = "darkgoldenrod2", aes(x = new_session, group = group)) +
+  theme_bw()+
+  geom_text(x=0.5, y=lm$coefficients[[1]], label="Intercept")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.2, yend = lm$coefficients[[1]] +lm$coefficients[[2]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+50, label="grouptest")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.8, yend = lm$coefficients[[1]]+lm$coefficients[[3]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+lm$coefficients[[3]], label="sessionT1")+
+  geom_segment(aes(x = 1.2, y = lm$coefficients[[1]]+lm$coefficients[[2]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]), linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=2, y=800, label="X")+
+  geom_segment(aes(x = 1.8, y = lm$coefficients[[1]]+lm$coefficients[[3]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]),  linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=1.95, y=830, label="X")+
+  theme_bw()+
+  scale_x_discrete(breaks = c("T0", "T1"), labels = c("T0 = 0","T1 = 1"))+
+  scale_fill_manual(breaks = c("control", "test"), labels = c("control = 0", "test = 1"), values = c("#F8766D", "#00BFC4"))
+
+```
+
+
+Here "sessionT1" is negative meaning that the reaction times decrease from T0 to T1 in controls (retest effect). 
+
+The interaction "grouptest:sessionT1" is negative meaning that the effect of session is stronger in the test group (retest plus training effect). 
+
+Note that if "sessionT1" was positive, a negative interaction would have a different meaning. The best way to interpret your interaction is to plot it!
+
+# How to get main effects (Anova style) from linear models
+
+## get main effects, style 1 = Anova function from rstatix library
+
+```{r}
+Anova(lm)
+```
+
+Note that the effect of group is back. 
+
+## get main effects, style 2 = from dummy coding (0,1) to contrast coding (-0.5,0.5)
+
+```{r}
+data.mean.contrast = data.mean%>%
+  # create a new variable containing -0.5 when session is T0 and +0.5 when session is T1
+  mutate(session.contrast = case_when(
+    session == "T0" ~ -0.5,
+    session == "T1" ~ 0.5
+  ))%>%
+  mutate(group.contrast = case_when(
+    # create a new variable containing -0.5 when group is control and +0.5 when group is test. 
+    group == "control" ~ -0.5,
+    group == "test" ~ 0.5
+  ))
+```
+
+```{r, echo = FALSE}
+# use the contrasted variable is your model
+lm.contrast = lm(rt.mean.bPbS ~ group.contrast*session.contrast, data = data.mean.contrast)
+summary(lm.contrast)
+```
+
+Back to the main effect results.
+
+Contrary to the Anova you get estimates of your main effects. 
+
+The estimates are different but the interaction remains the same.
+
+Mathematically:
+
+------------------------------------------------------------------------
+
+<center>
+
+rt.mean.bPbS = Intercept + grouptest\*group + sessionT1\*session + grouptest:sessionT1\*group\*session
+
+</center>
+
+Where
+
+-   session = -0.5 if T0, session = 0.5 if T1
+-   group = -0.5 if control, group = 0.5 if test
+-   The intercept is the mean over all data (session = 0, group = 0)
+
+------------------------------------------------------------------------
+
+```{r, echo = FALSE, message=FALSE}
+
+ggplot(data.interaction)+
+  geom_dotplot(aes(y = rt.mean.bPbS, x = session,fill = group),binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(aes(y = rt.mean.bPbS, x = session,fill = group), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(aes(y = rt.mean.bPbS, x = 1.5), fun = mean, geom = "point", col = "black", shape = 18, size = 4) +
+  geom_text(x=1.5, y=lm.contrast$coefficients[[1]]+100, label="Intercept", angle = 90)+
+  stat_summary(aes(y = rt.mean.bPbS, x = session), fun = mean, geom = "point", col = "black", shape = 18, size = 4)+
+  stat_summary(aes(y = rt.mean.bPbS, x = new_group, color = as.factor(new_group)), fun = mean, geom = "point", show.legend = FALSE, shape = 18, size = 4)+
+  geom_segment(aes(x = 1, y = lm.contrast$coefficients[[1]]+abs(lm.contrast$coefficients[[2]]/2), xend = 2, yend =  lm.contrast$coefficients[[1]]-abs(lm.contrast$coefficients[[2]])/2), color = "darkgoldenrod2")+
+  geom_text(x = 1.2, y = lm.contrast$coefficients[[1]],angle=-10, label = "group.contrast")+
+  geom_segment(aes(x = 1, y = lm.contrast$coefficients[[1]]+abs(lm.contrast$coefficients[[3]]/2), xend = 2, yend =  lm.contrast$coefficients[[1]]-abs(lm.contrast$coefficients[[3]]/2)), color = "darkgoldenrod2")+
+  geom_text(x = 1.8, y = 800,angle=-30, label = "session.contrast")+
+  theme_bw()+
+  scale_x_discrete(breaks = c("T0", "T1"), labels = c("T0 = -0.5","T1 = 0.5"))+
+  scale_fill_manual(breaks = c("control", "test"), labels = c("control = -0.5", "test = 0.5"), values = c("#F8766D", "#00BFC4"))
+
+```
+
+Note that the mean of the contrast should be 0 to set the Intercept to the mean of the overall data, and the difference to 1 to have the estimates equals to the differences between condition. "If you jump 1 in x, you jump your estimate in y"
+
+For example if you use (-1,1), the Intercept will still be the mean of the overall data but the estimates will be equal to half the difference between conditions. "Here we have to jump 2 on x to have the real estimate. So if you jump 1, you get estimate/2"
+
+```{r}
+data.mean.contrastdouble = data.mean%>%
+  mutate(session.contrast = case_when(
+    session == "T0" ~ -1,
+    session == "T1" ~ 1
+  ))%>%
+  mutate(group.contrast = case_when(
+    group == "control" ~ -1,
+    group == "test" ~ 1
+  ))
+```
+
+```{r}
+summary(lm(rt.mean.bPbS ~ group.contrast*session.contrast, data = data.mean.contrastdouble))
+```

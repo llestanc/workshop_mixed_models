@@ -1,0 +1,509 @@
+---
+title: "Mixed Model Workshop part 2"
+author: "Lorna Le Stanc"
+date: "10/22/2021"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+    df_print: paged
+    fig_width: 7
+    fig_height: 4
+---
+
+# Goal of this workshop session
+
+In this part two we will learn how to format our data to do mixed models. We will learn what is the random structure and how to interpret the output of mixed models in R. 
+
+# Needed libraries
+
+```{r, message = FALSE, warning=FALSE}
+# to perform planned contrasts & post-hocs /!\ load before tidyverse to prevent masking its 'select' function
+library(multcomp)
+
+# to manipulate and plot data
+library(tidyverse)
+
+# to do mixed models
+library(lme4)
+
+# to obtain main effects from linear models and linear mixed models
+library(rstatix)
+
+```
+
+# Dataset for the workshop
+
+Here we will work on reaction times (continuous variable)
+
+-   Two groups (control vs test)
+
+-   Two sessions (T0 vs T1)
+
+-   4 items per sessions (each with 5 trials) -\> 20 trials per participant and session.
+
+This is a 2x2 design, with group as a between-subjects variables and session as a within-subject variable.
+
+The dataset was built such as :
+
+```{r, eval = F}
+# Number of subjects per groups (2 groups, control/test)
+N = 30
+# number of trials per subject
+ntrials = 20
+# reaction time at T0 for both groups (ms)
+int.T0 = 950
+# Retest effect
+slope.retest = 100
+# Training effect
+slope.training = 150
+# variance among subjects at T0
+sd = 50
+# variance among retest and training effects is sd/2
+```
+
+```{r, echo = FALSE, message=FALSE, eval = T}
+data = read_csv("../data/dataset_groupXsessionXage.csv")%>%
+  rename(participant = pax)%>%
+  select(-age)
+
+data.mean = data %>%
+  group_by(participant, group,session)%>%
+  summarise(rt.mean.bPbS = mean(rt))%>%
+  ungroup()
+```
+
+
+# Mixed models (continous outcome, discreate predictors)
+
+Handle nested designs, repeated measures, unbalanced data sets, missing values, more than one source of structure in the residuals. 
+
+Indeed, repeated measure ANOVAs allow you to take into account one source of repetition in your data. Usually its participants. 
+
+## Data format
+
+Contrary to ANOVA's, you do not used collapsed data for mixed models. Instead you use data such as there is one line per trials. You will have several lines per participant and session. 
+
+
+```{r}
+
+head(data)
+```
+
+## Random structure = Structure in the data that is not explained by fixed effects
+
+### Mean effect of session for each group -> fixed effect of session
+
+As we've seen in part one of the workshop, reaction times are faster at T1 (retest effect for the control group and retest + training effect in the test group). 
+
+```{r, echo = FALSE, fig.width=10}
+ggplot(data.mean, aes(x = session, y = rt.mean.bPbS, color = group))+
+  stat_summary(aes(y = rt.mean.bPbS, x = session), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(aes(y = rt.mean.bPbS, group = 1), geom = "line",fun = mean)+ 
+  facet_grid(~ group)
+
+```
+
+### Random intercept
+
+Do all participants start at the same level at T0 ? -> Random intercept for participant
+
+
+```{r, echo = F, fig.width=10}
+
+ggplot(data.mean, aes(x = session, y = rt.mean.bPbS))+
+  geom_point(aes(color = participant))+
+  stat_summary(aes(y = rt.mean.bPbS, x = session), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(aes(y = rt.mean.bPbS, group = 1), geom = "line",fun = mean)+ 
+  theme_bw()+ 
+  facet_grid(~ group)
+
+```
+
+### Random slope
+
+Do all participants react in the same way to the training ? -> random session slope for participants
+
+```{r, echo = F, fig.width=10}
+
+ggplot(data.mean, aes(x = session, y = rt.mean.bPbS))+
+  geom_point(aes(color = participant))+
+  geom_line(aes(group = participant, color = participant))+
+  stat_summary(aes(y = rt.mean.bPbS, x = session), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(aes(y = rt.mean.bPbS, group = 1), geom = "line",fun = mean)+
+  theme_bw()+ 
+  facet_grid(~ group)
+```
+
+### Correlated random intercept and slope
+
+Are the participants start-level linked to how much they benefit from the training ? -> correlated random intercept and slope
+
+```{r}
+data.cor = data.mean%>%
+  pivot_wider(names_from = session, values_from = rt.mean.bPbS)%>%
+  mutate(training = T1-T0)%>%
+  select(-T1,-group,-participant)
+
+cor.test(data.cor$T0, data.cor$training)
+```
+
+### Random structure for items. 
+
+- Are some items easier than others (-> random intercept for items) ? 
+
+- Are some items more "trainable" than others (-> random session slope for items) ?
+
+- Do groups react in the same way to the items (-> random group slope for items) ?
+
+
+
+```{r, echo = FALSE, message=F}
+data.random.item = data%>%
+  group_by(item, session, group)%>%
+  summarise(rt.mean.bIbS = mean(rt))%>%
+  ungroup()
+
+ggplot(data.random.item, aes(x = session, y = rt.mean.bIbS))+
+  geom_point(aes(color = item))+
+  geom_line(aes(group = item, color = item))+
+  stat_summary(aes(y = rt.mean.bIbS, x = session), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  stat_summary(aes(y = rt.mean.bIbS, group = 1), geom = "line",fun = mean)+
+  theme_bw()+
+  facet_wrap(~group)
+
+```
+
+## Notation
+
+---
+
+- (1|s) = random intercept
+- (0+x|s) = random slope
+- (1|s) + (0+x|s) = uncorrelated random intercept and random slope
+- (1+x|s) = correlated random intercept and random slope
+
+---
+
+## When not to interpret ever eveR evER eVER EVER your model
+
+### Lack of convergence
+
+
+The process to fit a model consist of multiple iterations. \
+
+The process first attributes initial values to the parameters to estimate (here intercept and slopes). Then it computes the criteria to estimate whether the model is a good fit to the data (for example the maximum likelihood). Then it iterates this two steps by adjusting the parameters and recomputing the criteria. \
+When the criteria reaches an appropriate value then the model is said to converge. 
+
+When a model fail to converge, it means that the iterations to find the estimates does not reach a stable solution or that it is taking too long. The estimates are not trustworthy and you should not interpret the results.
+
+The message you get in R will be : 
+
+
+```{r}
+lme.fail = lmer(rt ~ group*session+ (1+session|participant)+ (1+group|trial), data = data) # failed
+```
+
+### Overfitting
+
+The goal of a model is to be able to generalize your data and to draw conclusion on what would be the outcome given a new set of predictors. When you over fit your data, the model is too close to the data, predicts perfectly each data point of your given data set but will not generalize to a new set of data. 
+
+```{r, echo = FALSE}
+data_ageheight = read_csv("../data/dataset_ageheight.csv")%>%
+  mutate(age_group = relevel(as.factor(age_group), ref = "younger"))
+
+lm.continuous = lm(height~ age, data_ageheight)
+
+ggplot(data_ageheight, aes(x = age, y = height))+
+  geom_point()+
+  geom_smooth(method = lm, se = F, fullrange = TRUE)+
+  geom_smooth(formula = y ~ poly(x,2), se = F, color = "red")+
+  scale_y_continuous(breaks=seq(0,160,20), limits = c(0,160),expand = c(0,0))+
+  scale_x_continuous(breaks = seq(0,15,1), limits = c(0,15),expand = c(0,0))+
+  theme_bw()+
+  theme(panel.grid.minor.x = element_blank())+
+  geom_vline(xintercept = 1.5)+
+  geom_segment(x = 1.5, xend = 0, y = 80, yend = 80, arrow =arrow(length = unit(0.1, "inches")), color = "blue")+
+  geom_segment(x = 1.5, xend = 0, y = 100, yend = 100, arrow =arrow(length = unit(0.1, "inches")), color = "red")
+```
+
+In blue, the true fit to the data, in red the overfit. 
+
+If you want to know what would be the height at 1.5 years old, you draw a vertical line at x = 1.5. The y for which it crosses the line drawn by the model tells you what is the predicted age according to that model. 
+
+You can see that the red line does not give you a generalisation for the data set, the red model overfits the data. 
+
+The message you would see in R is : 
+
+
+```{r}
+lme.singluar = lmer(rt ~ group*session+ (1|participant)+ (1+group|trial), data = data)
+```
+
+## How to choose your random structure
+
+There is no scientific consensus on how to do that. I will give you two methods. For sure you will find other methods in the literature. 
+
+For example, for method one (starting with maximal), if you built you material selecting the items such as no item was easier then you can justify not to include item in the random structure. 
+
+### Start with maximal and simply
+
+#### How to find your maximal structure
+
+Ask yourself what in you design could have a structure that you would want to control for. 
+
+Here we've see previously here: participants and items.
+
+To determine the maximal structure regarding the slopes, ask yourself what is measured repeatedly across participants and then across items. 
+
+Here participants are measured across sessions and items across groups and sessions. 
+
+Put everything correlated and don't forget interactions between random slopes. 
+
+```{r}
+lme.full = lmer(rt ~ group*session + (1+session|participant) + (1 + group*session|item), data = data)
+```
+
+#### Decorrelate and simplify until convergence and no overfitting. 
+
+
+| maximal       | (1+x1*x2\|s)   | 
+|--------------:|:-------------| 
+|uncorrelated intercept and slope	| (1\|s) + (0+x1*x2\|s)|
+| no interaction| (1+x1+x2\|s) | 
+| uncorrelated intercept and slope, no interaction|(1\|s) + (0+x1+x2\|s)     | 
+| no x2 | (1+x1\|s)      | 
+|uncorrelated intercept and slope, no x2	|(1\|s) + (0+x1\|s)|
+| no x1  |	(1+x2\|s) |
+| uncorrelated intercept and slope, no x1 |	(1\|s) + (0+x2\|s) |
+| intercept only	| (1\|s) |
+
+
+Look at your data to choose and to the variance in the random effects. 
+
+Here I started to simplify the items before the standard deviation for the random intercept and slopes for items was very low (see "Random effects" lines). 
+
+```{r}
+lme.full
+```
+
+
+
+```{r, eval = FALSE}
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group*session|item), data = data) # singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1+group+session|item), data = data) # singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group+session|item), data = data) # singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1+group|item), data = data) # singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) +(0+group|item), data = data) # singular
+```
+
+```{r}
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+```
+
+### Or think about your question
+
+Let's now say that the two groups were instead two schools. 
+
+```{r}
+data.school = data%>%
+  mutate(school = ifelse(group == "control","H4", "LLG"))
+
+ggplot(data.school, aes(x = session, y = rt, color = school) )+
+  stat_summary(aes(y = rt, x = session), geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    position = position_dodge(width = 0.9))
+```
+
+If we are interested in the effect of training, we might specify a multilevel model, because we really care about the effect of training and want to generalize it among schools. This model would be specified as:
+
+```{r}
+lme.trainingcontroledforschools = lmer(rt ~ session + (1|participant) +(1+session|school), data = data.school) 
+Anova(lme.trainingcontroledforschools)
+
+coefficients(lme.trainingcontroledforschools)$school
+```
+
+This is particularly helpful if there are a large number of schools we are testing this hypothesis over. 
+
+However, we might be interested in the school specific effects of training. In that case, they could specify school as a fixed effect:
+
+```{r}
+lme.traininginteractionschools = lmer(rt ~ school*session + (1|participant), data = data.school) 
+Anova(lme.traininginteractionschools)
+```
+
+
+## Interpretting 
+
+Back to groups and sessions.
+
+```{r}
+summary(lme.conv)
+```
+
+First line : tells you that you fitted a linear mixed model and the method used. REML stands for Restricted Maximum Likelihood Estimation (see http://users.stat.umn.edu/~gary/classes/5303/handouts/REML.pdf)
+
+**"Formula"** line: tells you the model fitted to your data
+
+**"Data"** line : tells you the dataset used to fit the model
+
+**"Scaled Residuals"** : minimum, first quartile, median, third quartile and maximum of scale residuals. 
+
+**"Random effects"** : details the variance for each random intercept and slope included in the model. 
+
+Here the first *Group* is participant for which we fitted an Intercept and a random slope for session. The second *Group* is item for which we only fitted a random intercept. 
+
+The *Corr* column represents the correlation between the intercept and slope. 
+
+**"Number of obs"** tells you the total number of data points, the number of participants and items. 
+
+**"Fixed effects"** tells you the estimate for the Intercept, slopes and interaction as we have seen for linear models in part one of this workshop. 
+
+Note that there as no p-values in the output of linear mixed models using lme4 package because p-values are challenged by the developers of the package (and they are not alone). We will see how to get them. In the mean time, note that a t value < -2 or  > 2 will be significant. 
+
+**"Correlation of Fixed Effects"**  is not about the correlation of the variables. It is in fact about the expected correlation of the regression coefficients. Although this may speak to multicollinearity it does not necessarily. It is telling you that if you did the experiment again and it so happened that the coefficient for one slope got smaller, it is likely that it would affect the other slope.
+
+As we have seen for linear models in part 1 of the workshop. The output gives you fixed effect rather than main effects and you should be careful when you write up your results and when you interpret the output of the model. 
+
+```{r, echo = FALSE, message=FALSE}
+data.interaction = data.mean%>%
+  mutate(session = as.factor(session))%>%
+  mutate(new_session = case_when(
+    group == "control" ~ as.numeric(session)-0.225,
+    group == "test" ~ as.numeric(session)+0.225
+  ))%>%
+  mutate(group = as.factor(group))%>%
+  mutate(new_group = case_when(
+    session == "T0" ~ as.numeric(group),
+    session == "T1" ~ as.numeric(group)
+  ))
+
+lm = lm(rt.mean.bPbS ~ group*session, data = data.mean)
+
+ggplot(data.interaction, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  # stat_summary(fun = mean, geom = "line", col = "darkgoldenrod2", aes(x = new_session, group = group)) +
+  theme_bw()+
+  geom_text(x=0.5, y=lm$coefficients[[1]], label="Intercept")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.2, yend = lm$coefficients[[1]] +lm$coefficients[[2]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+50, label="grouptest")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.8, yend = lm$coefficients[[1]]+lm$coefficients[[3]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+lm$coefficients[[3]], label="sessionT1")+
+  geom_segment(aes(x = 1.2, y = lm$coefficients[[1]]+lm$coefficients[[2]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]), linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=2, y=800, label="X")+
+  geom_segment(aes(x = 1.8, y = lm$coefficients[[1]]+lm$coefficients[[3]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]),  linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=1.95, y=830, label="X")+
+  theme_bw()+
+  scale_x_discrete(breaks = c("T0", "T1"), labels = c("T0 = 0","T1 = 1"))+
+  scale_fill_manual(breaks = c("control", "test"), labels = c("control = 0", "test = 1"), values = c("#F8766D", "#00BFC4"))
+
+```
+
+You can get the random slopes and intercepts from the model. 
+
+In our model : 
+- for participant you will have a different intercept and slope for session  for each participant. The slope for session and the interaction will be constant as they are not (and connot be) in the random structure for participant
+- for item you will only have a different intercept for each item as we removed all other slopes to allow the model to converge.
+
+
+```{r}
+coefficients(lme.conv)
+```
+
+
+## Get main effects (and p-values) using Anova from rstatix
+
+```{r}
+Anova(lme.conv)
+```
+
+## Get p-values style 2 = multcomp package corrects for multiple comparisons
+
+```{r}
+summary(glht(lme.conv))
+```
+
+## Get main effects using contrast coding and p-values using multcomp
+
+
+See part one of workshop for more details on contrast coding. 
+
+```{r}
+data.contrast = data %>%
+  mutate(session.contrast = case_when(
+    session == "T0" ~ -0.5,
+    session == "T1" ~ 0.5
+  ))%>%
+  mutate(group.contrast = case_when(
+    group == "control" ~ -0.5,
+    group == "test" ~ 0.5
+  ))
+
+lme.conv.contrast = lmer(rt ~ group.contrast*session.contrast + (1+session|participant) + (1|item), data = data.contrast) 
+summary(glht(lme.conv.contrast))
+
+```
+
+> It does not always make sense to contrast code all your variables. Sometimes it makes sense to have a reference group. 
+
+Cf main +post-hocs vs proper asked question. 
+
+## Get main effect using model comparison
+
+When you compare two models (using same data and same random structure !!!), the output of the anova tells you whether one model explains the data better than the other. 
+
+There is a rule in modeling : choose the parsimonious model if the more complex one does not explain your data better. 
+
+Comparing models answer to the question "Does adding this factor significantly increase the understanding of the data ?"
+
+Therefore comparing models can be used to know whether or not a factor significantly explains a part of your data. Some researchers use this to say there is a main effect of the factor. 
+
+
+### Is there an interaction ?
+
+```{r}
+lme.int = lmer(rt ~ group*session - group:session+ (1+session|participant) + (1|item), data = data) 
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+anova(lme.conv, lme.int)
+```
+
+This gets more complicated if you have more than two levels in a factor because removing the factor removes all levels and therefore several interactions. You cannot test them separately. 
+
+### Is there a main effect of session ?
+
+```{r}
+lme.int = lmer(rt ~ group*session - group+ (1+session|participant) + (1|item), data = data) 
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+anova(lme.conv, lme.int)
+```
+
