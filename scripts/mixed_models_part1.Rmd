@@ -483,7 +483,8 @@ data.mean.contrast = data.mean%>%
 
 ```{r, echo = FALSE}
 # use the contrasted variable is your model
-lm.contrast = lm(rt.mean.bPbS ~ group.contrast*session.contrast, data = data.mean.contrast)
+lm.contrast = lm(rt.mean.bPbS ~ group.contrast*session.contrast, 
+                 data = data.mean.contrast)
 summary(lm.contrast)
 ```
 
@@ -553,5 +554,6 @@ data.mean.contrastdouble = data.mean%>%
 ```
 
 ```{r}
-summary(lm(rt.mean.bPbS ~ group.contrast*session.contrast, data = data.mean.contrastdouble))
+summary(lm(rt.mean.bPbS ~ group.contrast*session.contrast, 
+           data = data.mean.contrastdouble))
 ```

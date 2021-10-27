@@ -558,7 +558,8 @@ summary(lm)</code></pre>
     group == &quot;control&quot; ~ -1,
     group == &quot;test&quot; ~ 1
   ))</code></pre>
-<pre class="r"><code>summary(lm(rt.mean.bPbS ~ group.contrast*session.contrast, data = data.mean.contrastdouble))</code></pre>
+<pre class="r"><code>summary(lm(rt.mean.bPbS ~ group.contrast*session.contrast, 
+           data = data.mean.contrastdouble))</code></pre>
 <pre><code>## 
 ## Call:
 ## lm(formula = rt.mean.bPbS ~ group.contrast * session.contrast, 

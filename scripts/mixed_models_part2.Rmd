@@ -4,10 +4,16 @@ author: "Lorna Le Stanc"
 date: "10/22/2021"
 output:
   html_document:
+    
     toc: yes
     number_sections: yes
     df_print: paged
     fig_width: 7
+    fig_height: 4
+  pdf_document:
+    toc: yes
+    number_sections: yes
+    fig_width: 5
     fig_height: 4
 ---
 
@@ -18,7 +24,8 @@ In this part two we will learn how to format our data to do mixed models. We wil
 # Needed libraries
 
 ```{r, message = FALSE, warning=FALSE}
-# to perform planned contrasts & post-hocs /!\ load before tidyverse to prevent masking its 'select' function
+# to perform planned contrasts & post-hocs /!\ load before tidyverse to prevent 
+# masking its 'select' function
 library(multcomp)
 
 # to manipulate and plot data
@@ -221,14 +228,15 @@ The message you get in R will be :
 
 
 ```{r}
-lme.fail = lmer(rt ~ group*session+ (1+session|participant)+ (1+group|trial), data = data) # failed
+lme.fail = lmer(rt ~ group*session+ (1+session|participant)+ (1+group|trial), 
+                data = data) # failed
 ```
 
 ### Overfitting
 
 The goal of a model is to be able to generalize your data and to draw conclusion on what would be the outcome given a new set of predictors. When you over fit your data, the model is too close to the data, predicts perfectly each data point of your given data set but will not generalize to a new set of data. 
 
-```{r, echo = FALSE}
+```{r, echo = FALSE, warning=FALSE, message = FALSE}
 data_ageheight = read_csv("../data/dataset_ageheight.csv")%>%
   mutate(age_group = relevel(as.factor(age_group), ref = "younger"))
 
@@ -257,7 +265,8 @@ The message you would see in R is :
 
 
 ```{r}
-lme.singluar = lmer(rt ~ group*session+ (1|participant)+ (1+group|trial), data = data)
+lme.singluar = lmer(rt ~ group*session+ (1|participant)+ (1+group|trial), 
+                    data = data)
 ```
 
 ## How to choose your random structure
@@ -281,7 +290,8 @@ Here participants are measured across sessions and items across groups and sessi
 Put everything correlated and don't forget interactions between random slopes. 
 
 ```{r}
-lme.full = lmer(rt ~ group*session + (1+session|participant) + (1 + group*session|item), data = data)
+lme.full = lmer(rt ~ group*session + (1+session|participant) + (1 + group*session|item),
+                data = data)
 ```
 
 #### Decorrelate and simplify until convergence and no overfitting. 
@@ -310,15 +320,26 @@ lme.full
 
 
 ```{r, eval = FALSE}
-lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group*session|item), data = data) # singular
-lme = lmer(rt ~ group*session + (1+session|participant) + (1+group+session|item), data = data) # singular
-lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group+session|item), data = data) # singular
-lme = lmer(rt ~ group*session + (1+session|participant) + (1+group|item), data = data) # singular
-lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) +(0+group|item), data = data) # singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group*session|item),
+           data = data) 
+# singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1+group+session|item), 
+           data = data) 
+# singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) + (0+group+session|item), 
+           data = data) 
+# singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1+group|item), 
+           data = data) 
+# singular
+lme = lmer(rt ~ group*session + (1+session|participant) + (1|item) +(0+group|item), 
+           data = data) 
+# singular
 ```
 
 ```{r}
-lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), 
+                data = data) 
 ```
 
 ### Or think about your question
@@ -340,7 +361,8 @@ ggplot(data.school, aes(x = session, y = rt, color = school) )+
 If we are interested in the effect of training, we might specify a multilevel model, because we really care about the effect of training and want to generalize it among schools. This model would be specified as:
 
 ```{r}
-lme.trainingcontroledforschools = lmer(rt ~ session + (1|participant) +(1+session|school), data = data.school) 
+lme.trainingcontroledforschools = lmer(rt ~ session + (1|participant) +(1+session|school), 
+                                       data = data.school) 
 Anova(lme.trainingcontroledforschools)
 
 coefficients(lme.trainingcontroledforschools)$school
@@ -351,7 +373,8 @@ This is particularly helpful if there are a large number of schools we are testi
 However, we might be interested in the school specific effects of training. In that case, they could specify school as a fixed effect:
 
 ```{r}
-lme.traininginteractionschools = lmer(rt ~ school*session + (1|participant), data = data.school) 
+lme.traininginteractionschools = lmer(rt ~ school*session + (1|participant), 
+                                      data = data.school) 
 Anova(lme.traininginteractionschools)
 ```
 
@@ -469,7 +492,8 @@ data.contrast = data %>%
     group == "test" ~ 0.5
   ))
 
-lme.conv.contrast = lmer(rt ~ group.contrast*session.contrast + (1+session|participant) + (1|item), data = data.contrast) 
+lme.conv.contrast = lmer(rt ~ group.contrast*session.contrast + (1+session|participant) + (1|item), 
+                         data = data.contrast) 
 summary(glht(lme.conv.contrast))
 
 ```
@@ -492,8 +516,10 @@ Therefore comparing models can be used to know whether or not a factor significa
 ### Is there an interaction ?
 
 ```{r}
-lme.int = lmer(rt ~ group*session - group:session+ (1+session|participant) + (1|item), data = data) 
-lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+lme.int = lmer(rt ~ group*session - group:session+ (1+session|participant) + (1|item), 
+               data = data) 
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), 
+                data = data) 
 anova(lme.conv, lme.int)
 ```
 
@@ -502,8 +528,10 @@ This gets more complicated if you have more than two levels in a factor because 
 ### Is there a main effect of session ?
 
 ```{r}
-lme.int = lmer(rt ~ group*session - group+ (1+session|participant) + (1|item), data = data) 
-lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+lme.int = lmer(rt ~ group*session - group+ (1+session|participant) + (1|item), 
+               data = data) 
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), 
+                data = data) 
 anova(lme.conv, lme.int)
 ```
 
