@@ -6,4 +6,4 @@ Pdf and Html documents with the content of the workshop are in **docs**. You can
 
 **data** contains the two datasets necessary to run the .rmd in **scripts** and obtain the htlm documents.
 
-To download the repository, click one the green "Code" button and Download zip.
+To download the repository, click on the green "Code" button and Download zip.
