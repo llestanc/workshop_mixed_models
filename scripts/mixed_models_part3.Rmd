@@ -1,0 +1,525 @@
+---
+title: "Mixed Model Workshop part 3"
+author: "Lorna Le Stanc"
+date: "10/22/2021"
+output:
+  html_document:
+    toc: yes
+    number_sections: yes
+    df_print: paged
+    fig_width: 7
+    fig_height: 4
+  pdf_document:
+    toc: yes
+    number_sections: yes
+    fig_width: 5
+    fig_height: 4
+---
+
+# Goal of this workshop session
+
+In this part three we will learn how to do post-hocs and planned contrasts for mixed models with categorical predictors.
+
+A quick paragraph on mixed model assumptions. Really not exhautive. 
+
+# Needed libraries
+
+```{r, message = FALSE, warning=FALSE}
+# to perform planned contrasts & post-hocs /!\ load before tidyverse to prevent 
+# masking its 'select' function
+library(multcomp)
+
+# to manipulate and plot data
+library(tidyverse)
+
+# to do mixed models
+library(lme4)
+
+# to obtain main effects from linear models and linear mixed models
+library(rstatix)
+
+```
+
+# Dataset for the workshop
+
+Here we will work on reaction times (continuous variable)
+
+-   Two groups (control vs test)
+
+-   Two sessions (T0 vs T1)
+
+-   4 items per sessions (each with 5 trials) -\> 20 trials per participant and session.
+
+This is a 2x2 design, with group as a between-subjects variables and session as a within-subject variable.
+
+The dataset was built such as :
+
+```{r, eval = F}
+# Number of subjects per groups (2 groups, control/test)
+N = 30
+# number of trials per subject
+ntrials = 20
+# reaction time at T0 for both groups (ms)
+int.T0 = 950
+# Retest effect
+slope.retest = 100
+# Training effect
+slope.training = 150
+# variance among subjects at T0
+sd = 50
+# variance among retest and training effects is sd/2
+```
+
+```{r, echo = FALSE, message=FALSE, eval = T}
+data = read_csv("../data/dataset_groupXsessionXage.csv")%>%
+  rename(participant = pax)%>%
+  select(-age)
+
+data.mean = data %>%
+  group_by(participant, group,session)%>%
+  summarise(rt.mean.bPbS = mean(rt))%>%
+  ungroup()
+```
+
+```{r echo=FALSE, message=FALSE, fig.align = "center"}
+
+ggplot(data.mean, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  theme_bw()
+```
+
+# Summary of previous results
+
+We arrived at the following model : 
+
+```{r}
+lme.conv = lmer(rt ~ group*session + (1+session|participant) + (1|item), data = data) 
+```
+
+With the following main effects : 
+
+```{r}
+Anova(lme.conv)
+```
+
+There is an interaction between group and session showing that the effect of session is different according to groups,  which we want to investigate. 
+
+
+```{r}
+summary(glht(lme.conv))
+```
+
+Given the output of the `lme.conv` model, we already have some information :
+
+- We know that there is no difference between groups at T0 (grouptest). $\beta = 5.4 ± 13.4, z = 79.9, p=.97$
+
+- We know that reaction times are faster at T1 for the control group (sessionT1). $\beta = -99.7 ± 6.9, z = -14.5, p<.001$
+
+- We know that the effect of session is different between groups (grouptest:sessionT1) $\beta = -143.4 ± 9.7, z = -14.8, p<.001$
+
+But we DONT have the following information : 
+
+- Is there a difference between groups at T1 and what is the estimate (a ?) ?
+- Is there a difference between sessions in the test group and what is the estimate (b ?) ?
+
+That's why we want to do post-hocs.
+
+```{r, echo = FALSE, message=FALSE}
+
+data.interaction = data.mean%>%
+  mutate(session = as.factor(session))%>%
+  mutate(new_session = case_when(
+    group == "control" ~ as.numeric(session)-0.225,
+    group == "test" ~ as.numeric(session)+0.225
+  ))%>%
+  mutate(group = as.factor(group))%>%
+  mutate(new_group = case_when(
+    session == "T0" ~ as.numeric(group),
+    session == "T1" ~ as.numeric(group)
+  ))
+
+```
+
+```{r, echo = FALSE, message=FALSE}
+lm = lm(rt.mean.bPbS ~ group*session, data = data.mean)
+
+ggplot(data.interaction, aes(y = rt.mean.bPbS, x = session,fill = group))+
+  geom_dotplot(binaxis = "y", stackdir = "center", dotsize = 0.5, position = "dodge")+
+  stat_summary(geom = "pointrange",
+    fun = mean,
+    fun.min = function(x) mean(x) - sd(x),
+    fun.max = function(x) mean(x) + sd(x),
+    col = "darkgoldenrod2",
+    position = position_dodge(width = 0.9),
+    show.legend = FALSE)+
+  # stat_summary(fun = mean, geom = "line", col = "darkgoldenrod2", aes(x = new_session, group = group)) +
+  theme_bw()+
+  geom_text(x=0.5, y=lm$coefficients[[1]], label="Intercept")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.2, yend = lm$coefficients[[1]] +lm$coefficients[[2]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+50, label="grouptest")+
+  geom_segment(aes(x = 0.8, y = lm$coefficients[[1]], xend = 1.8, yend = lm$coefficients[[1]]+lm$coefficients[[3]]), color = "darkgoldenrod2")+
+  geom_text(x=1, y=lm$coefficients[[1]]+lm$coefficients[[3]], label="sessionT1")+
+  geom_segment(aes(x = 1.2, y = lm$coefficients[[1]]+lm$coefficients[[2]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]), linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=2, y=790, label="b ?")+
+  geom_segment(aes(x = 1.8, y = lm$coefficients[[1]]+lm$coefficients[[3]], xend = 2.2, yend = lm$coefficients[[1]]+lm$coefficients[[2]]+lm$coefficients[[3]]+lm$coefficients[[4]]),  linetype = "dashed", color = "darkgoldenrod2")+
+  geom_text(x=1.95, y=840, label="a ?")+
+  theme_bw()+
+  scale_x_discrete(breaks = c("T0", "T1"), labels = c("T0 = 0","T1 = 1"))+
+  scale_fill_manual(breaks = c("control", "test"), labels = c("control = 0", "test = 1"), values = c("#F8766D", "#00BFC4"))
+
+```
+
+# Post-hocs
+
+Here I will use the glht function from multcomp package to perform post-hoc analyses. 
+
+
+```{r, echo=F}
+data.post = data%>%
+  mutate(group = as.factor(group),
+         session = as.factor(session))
+```
+
+## Tukey comparison
+
+Usually you see that on internet
+
+```{r, warning=F}
+summary(glht(lme.conv, linfct = mcp(group = "Tukey")),test=adjusted("none")) 
+```
+
+Warning, Tukey means that you compare all levels against each other. You test for all possible comparisons. But it is not a Tukey correction. Here there is no correction for multiple comparison `test=adjusted("none")`.
+
+Here there are only two levels so one comparison. If you had 3 levels, you would have 2 comparisons etc. 
+
+> Note that again, the results gives you the comparison at T0
+
+## How to define a contrast ? OR Why I've been annoying you with math 
+
+Another way to do post-hocs is to define the contrast you want to test. 
+
+```{r}
+# contrast
+KgroupT0 = rbind(c(0,1,0,0))
+# testing for the contrast, with no correction for multiple comparison : 
+# we have only one comparison
+summary(glht(lme.conv, linfct = KgroupT0),test=adjusted("none"))
+```
+
+Same result. 
+
+You see what does not appear in usual outputs : the hypothesis tested is whether the contrast is different from 0. In R the equality test is written `==`.
+
+### Write down the math of fixed effects for your model
+
+Remember : 
+
+---
+
+<center> rt.mean.bPbS = Intercept + grouptest\*group + sessionT1\*session + grouptest:sessionT1\*group\*session 
+</center>
+
+Where
+
+  - session = 0 if T0,  session =  1 if T1
+  - group = 0 if control, group = 1 if test
+  - Intercept is the mean in ref level (session = 0, group = 0)
+
+---
+
+WARNING : in the same order as in the model, you start building a table : 
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|----------------------------------------:|
+|contrast                |           |                      |                       |                                         |
+
+
+```{r}
+summary(glht(lme.conv))
+```
+
+You always multiply your intercept by one. It is never null, always there in your equation : 
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|----------------------------------------:|
+|contrast                |   1       |                      |                       |                                         |
+
+For test group at T0, group = 1, session = 0 : 
+
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|rt of tests at T0       | 1         | 1                    | 0                     | 1\*0 = 0                              |
+
+For test group at T1, group = 1, session = 1 : 
+
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|rt of tests at T0       | 1         | 1                    | 0                     | 1\*0 = 0                              |
+|rt of tests at T1       | 1         | 1                    | 1                     | 1\*1 = 1                              |
+
+> Testing the effect of session in the test group mathematically means testing whether (rt of tests at T1 - rt of tests at T0) is different from 0
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|rt of tests at T0       | 1         | 1                    | 0                     | 1\*0 = 0                              |
+|rt of tests at T1       | 1         | 1                    | 1                     | 1\*1 = 1                              |
+|T1 vs T0 for tests      | 0         | 0                    | 1                     | 1                                     |
+
+The last line is (line 2 - line 1). 
+
+Be careful with the direction of your sustraction. It will not change the stats but the sign of the estimate. 
+
+Mathematically : 
+
+---
+<center>
+T1 vs T0 for tests = rt of tests at T1 - rt of tests at T0 \
+rt of tests at T1 - rt of tests at T0 > 0 **means** rt of tests at T1 > rt of tests at T0\
+rt of tests at T1 - rt of tests at T0 < 0 **means** rt of tests at T1 < rt of tests at T0\
+</center>
+
+---
+
+If you define T1 vs T0 for tests = rt of tests at T0 - rt of tests at T1, a positive estimate will mean longer reaction time at T1 and a negative estimate will mean shorter reaction times at T1. It is the exact opposite meaning than in the previous definition.  
+
+### Translate into R code
+
+```{r}
+# define the contrast
+KsessionTests = rbind(c(0,0,1,1))
+# give it a name to keep track (this will appear in the output of the test)
+rownames(KsessionTests) = "Session Tests"
+# test it (no correction)
+summary(glht(lme.conv, linfct = KsessionTests),test=adjusted("none"))
+```
+
+The effect of session is significant in the test group. Reaction times are shorter at T1 by 243 ms in this group. 
+
+We can verify this result by releveling the group factor in the model to define the test group as the reference. 
+
+*sessionT1* will be the effect of session in the reference group ie the test group : 
+
+```{r}
+
+lme.group.relevel = lmer(rt ~ relevel(group, ref = "test") * session + 
+                              (1 + session | participant) + (1 | item), 
+                         data = data.post)
+lme.group.relevel
+
+```
+
+### Correct for multiple comparisons
+
+As we have done for the session effect in the test group, we can define the contrast for the effect of session in the control group : 
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|rt of controls at T1    | 1         | 0                    | 1                     | 0\*1 = 0                              |
+|rt of controls at T0    | 1         | 0                    | 0                     | 0\*0 = 0                              |
+|T1 vs T0 for controls   | 0         | 0                    | 1                     | 0                                     |
+
+
+```{r}
+# define the contrast for the sontrol groups
+KsessionControls = rbind(c(0,0,1,0))
+# give it a name to keep track
+rownames(KsessionControls) = "Session Controls"
+# combine the two contrasts
+Ksession = rbind(KsessionControls,KsessionTests)
+# test it and control for multiple comparison with bonferroni correction
+summary(glht(lme.conv, linfct = Ksession),test=adjusted("bonferroni"))
+```
+
+I've chosen to test the effects of session in the two groups. I could have tested the effect of group in the different sessions : 
+
+
+|rt =                    |Intercept  |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|rt of controls at T0    | 1         | 0                    | 0                     | 0\*0 = 0                              |
+|rt of test at T0        | 1         | 1                    | 0                     | 1\*0 = 0                              |
+|tests vs controls at T0 | 0         | 1                    | 0                     | 0                                     |
+|------------------------|-----------|----------------------|-----------------------|---------------------------------------|
+|rt of controls at T1    | 1         | 0                    | 1                     | 0\*1 = 0                              |
+|rt of test at T1        | 1         | 1                    | 1                     | 1\*1 = 1                              |
+|tests vs controls at T1 | 0         | 1                    | 0                     | 1                                     |
+
+
+```{r}
+# contrast for T1
+KgroupT1 = rbind(c(0,1,0,1))
+# contrast for T0
+KgroupT0 = rbind(c(0,1,0,0))
+# combine contrasts
+Kgroup = rbind(KgroupT0,KgroupT1)
+# give names to keep track
+rownames(Kgroup) = c("group at T0","group at T1")
+# test while correcting for multiple comparisons
+summary(glht(lme.conv, linfct = Kgroup),test=adjusted("bonferroni"))
+
+```
+
+Again we can check by releveling the session this time : 
+
+```{r}
+lme.session.relevel = lmer(rt ~ group * relevel(session, ref = "T1") 
+                                + (1 + session | participant) + (1 | item), 
+                           data = data.post)
+lme.session.relevel
+```
+
+# Planned contrasts
+
+As we defined the post-hocs, we can also define other contrasts. 
+
+## Main effects
+
+Lets define the main effect of session : 
+
+Mathematically : 
+
+---
+<center>
+T1 vs T0 = mean rt at T1 across groups - mean rt of at T0 across groups \
+mean rt at T1 across groups = (rt at T1 for tests + rt at T1 for controls) /2\
+mean rt at T0 across groups = (rt at T0 for tests + rt at T0 for controls) /2
+</center>
+
+---
+
+Let's figure out the contrasts : 
+
+
+|rt =                        |Intercept    |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|----------------------------|------------:|---------------------:|----------------------:|--------------------------------------:|
+|rt at T1 for tests          | 1           | 1                    | 1                     | 1\*1 = 1                              |
+|rt at T1 for controls       | 1           | 0                    | 1                     | 0\*1 = 0                              |
+|mean rt at T1 across groups | (1+1)/2 = 1 | (1+0)/2 = 0.5        |(1+1)/2 = 1            | (1+0)/2 = 0.5                         |
+|----------------------------|-------------|----------------------|-----------------------|---------------------------------------|
+|rt at T0 for tests          | 1           | 1                    | 0                     | 1\*0 = 0                              |
+|rt at T0 for controls       | 1           | 0                    | 0                     | 0\*0 = 0                              |
+|mean rt at T0 across groups | (1+1)/2 = 1 | (1+0)/2 = 0.5        |(0+0)/2 = 0            | (0+0)/2 = 0                           |
+|----------------------------|-------------|----------------------|-----------------------|---------------------------------------|
+|T1 vs T0                    | 1-1 = 0     | 0.5-0.5 = 0          | 1-0 = 1               | 0.5-0 = 0.5                           |
+|----------------------------|-------------|----------------------|-----------------------|---------------------------------------|
+
+
+```{r}
+Ksessionmain=rbind(c(0,0,1,0.5))
+rownames(Ksessionmain) = "Main effect of session"
+summary(glht(lme.conv, linfct = Ksessionmain),test=adjusted("none"))
+```
+
+
+In the same way you can define the main effect of group : 
+
+
+|rt =                        |Intercept    |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|mean rt for controls    | 1         | 0                    | 0.5                   | 0\*0.5 = 0                            |
+|mean rt for tests       | 1         | 1                    | 0.5                   | 1\*0.5 = 0.5                          |
+|tests vs controls       | 0         | 1                    | 0                     | 0.5                                   |
+
+
+
+```{r}
+Kgroupmain=rbind(c(1,1,0.5,0.5)-c(1,0,0.5,0))
+rownames(Kgroupmain) = "Main effect of group"
+summary(glht(lme.conv, linfct = Kgroupmain),test=adjusted("none"))
+```
+
+## Interactions
+
+In the same way you can define the contrast for the interaction.
+
+Mathematically : 
+
+---
+<center>
+interaction = effect of session for controls - effect of session for tests \
+</center>
+---
+
+From previously defined contrast we get : 
+
+|rt =                        |Intercept    |+ (grouptest) x group |+ (sessionT1) x session|+ (grouptest:sessionT1) x group x session|
+|------------------------|----------:|---------------------:|----------------------:|--------------------------------------:|
+|T1 vs T0 for controls   | 0         | 0                    | 1                     | 0                                     |
+|T1 vs T0 for tests      | 0         | 0                    | 1                     | 1                                     |
+|interaction             | 0         | 0                    | 0                     | 1                                     |
+
+```{r}
+
+Kinteraction=KsessionTests-KsessionControls # same as KgroupT1-KgroupT0
+rownames(Kinteraction) = "Interaction"
+Kinteraction
+summary(glht(lme.conv, linfct = Kinteraction),test=adjusted("none"))
+
+```
+
+## Planned contrast
+
+```{r}
+# plan your contrast and test all at once
+Kultimate=rbind(Kgroupmain,
+                Ksessionmain,
+                Kinteraction,
+                Ksession)
+summary(glht(lme.conv, linfct = Kultimate),test=adjusted("bonferroni"))
+summary(lme.conv)
+```
+
+
+# Mixed Model Assumptions
+
+## Hypothesis of linearity (not necesssary when categorical predictors)
+
+## normality of residuals
+
+```{r}
+qqnorm(resid(lme.conv))
+qqline(resid(lme.conv), col = "red")
+
+lme.log = lmer(log(rt) ~ group * session + (1 + session | participant) + (1 | item), data = data)
+
+qqnorm(resid(lme.log))
+qqline(resid(lme.log), col = "red")
+```
+
+```{r, echo = FALSE, eval = T}
+summary(lme.log)
+summary(lme.conv)
+```
+
+```{r}
+plot(lme.conv)
+```
+
+
+## normality of random intercept, random slopes
+
+```{r}
+qqnorm(ranef(lme.conv)$participant[,1] )
+qqline(ranef(lme.conv)$participant[,1], col = "red")
+
+qqnorm(ranef(lme.conv)$participant[,2] )
+qqline(ranef(lme.conv)$participant[,2], col = "red")
+
+qqnorm(ranef(lme.conv)$item[,1] )
+qqline(ranef(lme.conv)$item[,1], col = "red")
+```
+
+
+```{r, eval = FALSE, echo = F}
+lme.c = lmer(rt ~ session*age + (1+session|participant), data = data)
+summary(lme.c)
+```
+
